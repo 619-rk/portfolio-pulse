@@ -19,10 +19,8 @@ const LAND_MASK_URL = "https://unpkg.com/three-globe@2.45.2/example/img/earth-wa
  */
 export async function createStarfield(visited, yourStarId = null) {
   const group = new THREE.Group();
-  const occluder = makeOccluder();      // hides the back hemisphere for stars & effects
   const bg = await makeBackground(BACKGROUND_TARGET);
   const fg = makeForeground(visited, yourStarId);
-  group.add(occluder);
   group.add(bg.mesh);
   group.add(fg.mesh);
 
@@ -32,20 +30,6 @@ export async function createStarfield(visited, yourStarId = null) {
   }
 
   return { mesh: group, update, fg, bg, visited };
-}
-
-// Invisible sphere that writes depth so anything on the far hemisphere is
-// culled by depth-test. Sits just below where the star points live.
-function makeOccluder() {
-  const geo = new THREE.SphereGeometry(SPHERE_RADIUS * 0.996, 48, 32);
-  const mat = new THREE.MeshBasicMaterial({
-    colorWrite: false,      // invisible
-    depthWrite: true,       // but does write to the depth buffer
-    depthTest: true,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.renderOrder = -1;     // render before stars so its depth is written first
-  return mesh;
 }
 
 /* ---------- background: ~10k dim red "unvisited" stars on LAND ---------- */

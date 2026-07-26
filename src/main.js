@@ -1,29 +1,21 @@
 // Constellation — entry point.
-// drag/zoom + pmndrs/postprocessing (god rays + bloom) + info panel with Wikipedia + hero photo.
+// drag-to-rotate + bloom + click star → info panel with Wikipedia + shockwave ring.
 
 import * as THREE from "three";
 import { createScene, pointer } from "./scene.js";
 import { createStarfield } from "./stars.js";
-import { createFlare } from "./flare.js";
+import { createShockwaveLayer } from "./shockwave.js";
 import {
   initHud, setCount, setPlaces, setLocation, setColo,
   showTooltip, hideTooltip, showInfo, hideInfo,
 } from "./hud.js";
 
 const canvas = document.getElementById("scene");
-
-// The click flare acts as the god-rays light source, so it must exist BEFORE
-// we build the effect pipeline.
-const flare = createFlare();
-
 const {
   scene, camera, renderer, world, render,
   onResize, onPointerMove, onPointerDown, onPointerUp, onWheel,
   tickWorld,
-} = createScene(canvas, flare.mesh);
-
-// The flare rotates with the globe.
-world.add(flare.mesh);
+} = createScene(canvas);
 
 initHud({ visitorCount: "—", places: "—", city: "locating…", colo: "—" });
 
@@ -45,6 +37,10 @@ async function bootstrap() {
   const field = await createStarfield(stars, yourId);
   world.add(field.mesh);
 
+  // Shockwave layer sits inside the world so waves rotate with the globe.
+  const shocks = createShockwaveLayer();
+  world.add(shocks.mesh);
+
   const realStars = stars.filter((s) => s.ts);
   const uniquePlaces = new Set(
     realStars.map((s) => `${(s.city || "").toLowerCase()}|${s.country || ""}`)
@@ -59,11 +55,11 @@ async function bootstrap() {
   );
   setColo(payload.you?.colo ?? "—");
 
-  setupInteraction(field, stars);
-  startLoop(field);
+  setupInteraction(field, stars, shocks);
+  startLoop(field, shocks);
 }
 
-function setupInteraction(field, stars) {
+function setupInteraction(field, stars, shocks) {
   const raycaster = new THREE.Raycaster();
   raycaster.params.Points.threshold = 0.04;
 
@@ -107,7 +103,7 @@ function setupInteraction(field, stars) {
         if (star) {
           hideTooltip();
           showInfo(star);
-          flare.spawnAt(star.lat, star.lon);
+          shocks.spawnAt(star.lat, star.lon);
           return;
         }
       }
@@ -120,12 +116,12 @@ function setupInteraction(field, stars) {
   });
 }
 
-function startLoop(field) {
+function startLoop(field, shocks) {
   const start = performance.now();
   function tick() {
     const t = (performance.now() - start) / 1000;
     field.update(t);
-    flare.update();
+    shocks.update(t);
     tickWorld();
     render();
     requestAnimationFrame(tick);
