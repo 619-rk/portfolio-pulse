@@ -1,13 +1,19 @@
 // HUD + tooltip + info panel controls.
 
-export function initHud({ visitorCount, city, colo }) {
+export function initHud({ visitorCount, places, city, colo }) {
   setCount(visitorCount);
+  setPlaces(places);
   setLocation(city);
   setColo(colo);
 }
 
 export function setCount(n) {
   const el = document.getElementById("visitor-count");
+  if (el) el.textContent = String(n);
+}
+
+export function setPlaces(n) {
+  const el = document.getElementById("places-count");
   if (el) el.textContent = String(n);
 }
 

@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { createScene, pointer } from "./scene.js";
 import { createStarfield } from "./stars.js";
 import {
-  initHud, setCount, setLocation, setColo,
+  initHud, setCount, setPlaces, setLocation, setColo,
   showTooltip, hideTooltip, showInfo, hideInfo,
 } from "./hud.js";
 
@@ -16,7 +16,7 @@ const {
   tickWorld,
 } = createScene(canvas);
 
-initHud({ visitorCount: "—", city: "locating…", colo: "—" });
+initHud({ visitorCount: "—", places: "—", city: "locating…", colo: "—" });
 
 bootstrap();
 
@@ -36,7 +36,15 @@ async function bootstrap() {
   const field = await createStarfield(stars, yourId);
   world.add(field.mesh);
 
-  setCount(payload.total ?? stars.length);
+  // Total visits = real visitor stars (excluding seed cities).
+  // Unique places = distinct city+country pairs among real visitors.
+  const realStars = stars.filter((s) => s.ts);
+  const uniquePlaces = new Set(
+    realStars.map((s) => `${(s.city || "").toLowerCase()}|${s.country || ""}`)
+  ).size;
+
+  setCount(payload.real ?? realStars.length);
+  setPlaces(uniquePlaces);
   setLocation(
     payload.you?.city
       ? `${payload.you.city.toLowerCase()}, ${payload.you.country ?? ""}`.trim()
