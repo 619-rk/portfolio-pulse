@@ -33,6 +33,12 @@ export function createScene(canvas) {
     lastX: 0, lastY: 0,
     lastMoveTime: 0,
     lastInteractionTime: 0,
+    // Rotate-to-target animation state
+    rotating: false,
+    rotStart: 0,
+    rotDuration: 0,
+    fromRotX: 0, fromRotY: 0,
+    toRotX: 0,   toRotY: 0,
   };
 
   const DAMPING = 0.94;
@@ -47,6 +53,7 @@ export function createScene(canvas) {
 
   function onPointerDown(e) {
     state.dragging = true;
+    state.rotating = false;      // dragging cancels any auto-center tween
     state.velX = 0;
     state.velY = 0;
     state.lastX = e.clientX;
@@ -100,7 +107,14 @@ export function createScene(canvas) {
 
   function tickWorld() {
     const now = performance.now();
-    if (!state.dragging) {
+
+    if (state.rotating) {
+      const t = Math.min(1, (now - state.rotStart) / state.rotDuration);
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      state.rotX = state.fromRotX + (state.toRotX - state.fromRotX) * e;
+      state.rotY = state.fromRotY + (state.toRotY - state.fromRotY) * e;
+      if (t >= 1) state.rotating = false;
+    } else if (!state.dragging) {
       state.rotY += state.velY;
       state.rotX += state.velX;
       state.velY *= DAMPING;
@@ -110,9 +124,43 @@ export function createScene(canvas) {
       }
       state.rotX = Math.max(-Math.PI / 2 + 0.2, Math.min(Math.PI / 2 - 0.2, state.rotX));
     }
+
     world.rotation.y = state.rotY;
     world.rotation.x = state.rotX;
     world.updateMatrixWorld();
+  }
+
+  /**
+   * Rotate the globe so the given lat/lon faces the camera. Animated over `durationMs`.
+   * Interrupts drift and inertia; a subsequent drag will cancel the animation.
+   */
+  function rotateTo(lat, lon, durationMs = 1200) {
+    // Target rotations for a globe with rotation order Y then X:
+    //   after rotY the world's longitude at the front is (-lon + 90° - offset)
+    // We choose rotations so the target vector ends up at (0, 0, 1) (front).
+    // Derivation: a point at (lat, lon) mapped by latLonToVec3 is at bearing
+    // theta = (lon + 180)°, so we want rotY to bring theta to 90° (front, +z),
+    // i.e. rotY = π/2 - theta.
+    const theta = (lon + 180) * (Math.PI / 180);
+    const targetRotY = Math.PI / 2 - theta;
+    const targetRotX = lat * (Math.PI / 180);
+
+    // Choose the shortest angular path around the Y axis.
+    let dy = targetRotY - state.rotY;
+    while (dy > Math.PI) dy -= 2 * Math.PI;
+    while (dy < -Math.PI) dy += 2 * Math.PI;
+
+    state.fromRotX = state.rotX;
+    state.fromRotY = state.rotY;
+    state.toRotX = Math.max(-Math.PI / 2 + 0.2, Math.min(Math.PI / 2 - 0.2, targetRotX));
+    state.toRotY = state.rotY + dy;
+    state.rotStart = performance.now();
+    state.rotDuration = durationMs;
+    state.rotating = true;
+    // Kill drift/inertia so it doesn't fight us during the tween.
+    state.velX = 0;
+    state.velY = 0;
+    state.lastInteractionTime = performance.now();
   }
 
   function render() {
@@ -122,6 +170,6 @@ export function createScene(canvas) {
   return {
     scene, camera, renderer, world, render,
     onResize, onPointerMove, onPointerDown, onPointerUp, onWheel,
-    tickWorld,
+    tickWorld, rotateTo,
   };
 }
