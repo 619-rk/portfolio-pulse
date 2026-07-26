@@ -11,7 +11,7 @@ const SPHERE_RADIUS = 1.6;
 const BACKGROUND_TARGET = 10000;
 // three-globe ships a black/white land/water mask via unpkg. If the fetch fails we
 // silently degrade to a full-sphere background.
-const LAND_MASK_URL = "https://unpkg.com/three-globe/example/img/earth-water.png";
+const LAND_MASK_URL = "https://unpkg.com/three-globe@2.45.2/example/img/earth-water.png";
 
 /**
  * @param {Array<{lat:number, lon:number, id?:string}>} visited
@@ -179,16 +179,24 @@ async function landPoints(target) {
   const W = img.width, H = img.height;
   canvas.width = W;
   canvas.height = H;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
-  const { data } = ctx.getImageData(0, 0, W, H);
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, W, H).data;
+  } catch (e) {
+    // Canvas got tainted — CORS issue with the source. Fall back.
+    console.warn("land mask tainted, falling back to full sphere", e);
+    throw e;
+  }
 
+  // three-globe's earth-water: LAND is BLACK (near 0), WATER is WHITE (near 255).
+  // Sample uniformly on the sphere; keep points where the pixel is dark.
   const points = [];
   let tries = 0;
-  const maxTries = target * 8;
+  const maxTries = target * 12;
   while (points.length < target && tries < maxTries) {
     tries++;
-    // Uniform sphere sampling
     const u = Math.random();
     const v = Math.random();
     const lat = Math.asin(2 * v - 1) * 180 / Math.PI;
@@ -196,9 +204,9 @@ async function landPoints(target) {
     const px = Math.floor(((lon + 180) / 360) * W);
     const py = Math.floor((1 - (lat + 90) / 180) * H);
     const idx = (py * W + px) * 4;
-    // three-globe's earth-water: land = white, water = black.
-    if (data[idx] > 128) points.push({ lat, lon });
+    if (data[idx] < 128) points.push({ lat, lon });
   }
+  console.log(`✓ land mask: ${points.length} land points in ${tries} tries (${W}x${H})`);
   return points;
 }
 
