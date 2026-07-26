@@ -116,10 +116,6 @@ export function createScene(canvas) {
   }
 
   function render() {
-    composer.render();
-  }
-
-  function render() {
     renderer.render(scene, camera);
   }
 
