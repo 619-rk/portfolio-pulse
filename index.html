@@ -16,6 +16,21 @@
     <div class="row"><span class="k">places</span><span class="v" id="places-count">—</span></div>
     <div class="row"><span class="k">you</span><span class="v" id="visitor-loc">locating…</span></div>
     <div class="row"><span class="k">edge</span><span class="v" id="edge-colo">—</span></div>
+    <button id="hud-compose" class="hud-btn" type="button">✎ leave a message</button>
+  </div>
+
+  <!-- Global composer — opens from HUD button. Posts from visitor's city. -->
+  <div id="composer-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <button id="composer-close" class="modal-close" aria-label="Close">×</button>
+      <div class="modal-title">Leave a message from <span id="composer-city">—</span></div>
+      <div class="modal-sub">Anyone who clicks your city will read this.</div>
+      <textarea id="composer-text" maxlength="140" rows="3" placeholder="140 characters. Say something kind."></textarea>
+      <div class="modal-row">
+        <span id="composer-hint" class="modal-hint">140 chars · one message per 24h</span>
+        <button id="composer-send" type="button">post</button>
+      </div>
+    </div>
   </div>
 
   <div id="tooltip" class="hidden"></div>
@@ -34,14 +49,6 @@
     <a id="info-link" href="#" target="_blank" rel="noopener" hidden>read more →</a>
 
     <div id="info-messages" class="messages"></div>
-
-    <form id="info-composer" class="composer" hidden>
-      <textarea id="info-composer-text" maxlength="140" rows="2" placeholder="Leave a message from your city…"></textarea>
-      <div class="composer-row">
-        <span id="info-composer-hint" class="composer-hint"></span>
-        <button type="submit" id="info-composer-send">post</button>
-      </div>
-    </form>
   </aside>
 
   <div id="hint">drag to rotate · click a star</div>

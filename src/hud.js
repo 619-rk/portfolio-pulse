@@ -1,6 +1,6 @@
-// HUD + tooltip + info panel controls.
+// HUD + tooltip + star-info panel + global "leave a message" modal.
 
-let visitorCityCache = null; // set from main.js; used to enable the composer
+let visitorCityCache = null;
 
 export function initHud({ visitorCount, places, city, colo }) {
   setCount(visitorCount);
@@ -9,26 +9,28 @@ export function initHud({ visitorCount, places, city, colo }) {
   setColo(colo);
 }
 
-/** Called from main.js once we know the visitor's canonical city (from /api/stars). */
+/** Called from main.js once we know the visitor's canonical city. */
 export function setVisitorCity(city) {
-  visitorCityCache = city ? city.trim().toLowerCase() : null;
+  visitorCityCache = city || null;
+  // Fill the composer's city name and enable the HUD button when we know where we are.
+  const cityLabel = document.getElementById("composer-city");
+  if (cityLabel) cityLabel.textContent = city ? city.toLowerCase() : "your city";
+  const btn = document.getElementById("hud-compose");
+  if (btn) btn.disabled = !city;
 }
 
 export function setCount(n) {
   const el = document.getElementById("visitor-count");
   if (el) el.textContent = String(n);
 }
-
 export function setPlaces(n) {
   const el = document.getElementById("places-count");
   if (el) el.textContent = String(n);
 }
-
 export function setLocation(city) {
   const el = document.getElementById("visitor-loc");
   if (el) el.textContent = city ?? "—";
 }
-
 export function setColo(colo) {
   const el = document.getElementById("edge-colo");
   if (el) el.textContent = colo ?? "—";
@@ -54,11 +56,11 @@ export function hideTooltip() {
   if (el) el.classList.add("hidden");
 }
 
-/* ----------------------------- info panel ---------------------------- */
+/* ------------------ info panel (Wikipedia + messages) ---------------- */
 
 let currentFactController = null;
 let currentMsgController  = null;
-let currentStar = null;   // the star the panel is currently showing
+let currentStar = null;
 
 export function showInfo(star) {
   const panel = document.getElementById("info");
@@ -68,8 +70,6 @@ export function showInfo(star) {
   const linkEl = document.getElementById("info-link");
   const heroEl = document.getElementById("info-hero");
   const msgsEl = document.getElementById("info-messages");
-  const composer = document.getElementById("info-composer");
-  const composerHint = document.getElementById("info-composer-hint");
   if (!panel) return;
 
   currentStar = star;
@@ -92,23 +92,11 @@ export function showInfo(star) {
   panel.classList.remove("hidden");
   panel.setAttribute("aria-hidden", "false");
 
-  // Composer visibility — only for the visitor's own city.
-  const isMyCity = visitorCityCache
-    && star.city
-    && star.city.trim().toLowerCase() === visitorCityCache;
-  if (composer) {
-    composer.hidden = !isMyCity;
-    if (composerHint) {
-      composerHint.textContent = isMyCity ? "140 chars · one per 24h" : "";
-    }
-  }
-
-  // Fact fetch
   if (currentFactController) currentFactController.abort();
   currentFactController = new AbortController();
   fetchFact(star.city, currentFactController.signal)
     .then((fact) => {
-      if (currentStar !== star) return; // panel changed under us
+      if (currentStar !== star) return;
       if (!fact) {
         bodyEl.innerHTML = `<em>No entry found for this place.</em>`;
         return;
@@ -123,12 +111,8 @@ export function showInfo(star) {
         heroEl.classList.remove("empty");
       }
     })
-    .catch((err) => {
-      if (err.name === "AbortError") return;
-      bodyEl.innerHTML = `<em>Couldn't load a fact right now.</em>`;
-    });
+    .catch((err) => { if (err.name !== "AbortError") bodyEl.innerHTML = `<em>Couldn't load a fact right now.</em>`; });
 
-  // Messages fetch
   if (currentMsgController) currentMsgController.abort();
   currentMsgController = new AbortController();
   fetchMessages(star.city, currentMsgController.signal)
@@ -136,30 +120,22 @@ export function showInfo(star) {
       if (currentStar !== star) return;
       renderMessages(messages);
     })
-    .catch((err) => {
-      if (err.name === "AbortError") return;
-      // Silent on messages — they're a bonus.
-    });
+    .catch(() => {/* silent */});
 }
 
 function renderMessages(messages) {
   const msgsEl = document.getElementById("info-messages");
   if (!msgsEl) return;
   if (!messages || messages.length === 0) {
-    msgsEl.innerHTML = `<div class="empty">be the first to say hello</div>`;
+    msgsEl.innerHTML = `<div class="empty">no messages from here yet</div>`;
     return;
   }
-  const html = messages
-    .slice()
-    .reverse()
-    .map((m) => `
-      <div class="msg">
-        ${escapeHtml(m.text)}
-        <span class="when">${relativeTime(m.ts)}</span>
-      </div>
-    `)
-    .join("");
-  msgsEl.innerHTML = html;
+  msgsEl.innerHTML = messages.slice().reverse().map((m) => `
+    <div class="msg">
+      ${escapeHtml(m.text)}
+      <span class="when">${relativeTime(m.ts)}</span>
+    </div>
+  `).join("");
 }
 
 export function hideInfo() {
@@ -174,48 +150,67 @@ export function hideInfo() {
 
 document.getElementById("info-close")?.addEventListener("click", hideInfo);
 
-/* -------------------------- composer wiring -------------------------- */
+/* -------------------- global composer modal wiring ------------------- */
 
-const composerForm = document.getElementById("info-composer");
-if (composerForm) {
-  composerForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const textEl = document.getElementById("info-composer-text");
-    const btn    = document.getElementById("info-composer-send");
-    const hint   = document.getElementById("info-composer-hint");
-    const text = (textEl.value || "").trim();
-    if (!text) return;
+const modal      = document.getElementById("composer-modal");
+const modalText  = document.getElementById("composer-text");
+const modalSend  = document.getElementById("composer-send");
+const modalHint  = document.getElementById("composer-hint");
+const modalClose = document.getElementById("composer-close");
+const openBtn    = document.getElementById("hud-compose");
 
-    btn.disabled = true;
-    const originalHint = hint.textContent;
-    hint.textContent = "posting…";
-
-    try {
-      const res = await fetch("/api/messages", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        hint.textContent = data.error || "error";
-        setTimeout(() => (hint.textContent = originalHint), 2500);
-        return;
-      }
-      textEl.value = "";
-      renderMessages(data.messages || []);
-      hint.textContent = data.created === false ? "already posted today" : "posted ✓";
-      setTimeout(() => (hint.textContent = originalHint), 2500);
-    } catch (err) {
-      hint.textContent = "network error";
-      setTimeout(() => (hint.textContent = originalHint), 2500);
-    } finally {
-      btn.disabled = false;
-    }
-  });
+function openComposer() {
+  if (!modal || !visitorCityCache) return;
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  setTimeout(() => modalText?.focus(), 50);
+}
+function closeComposer() {
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
 }
 
-/* ------------------------------ helpers ------------------------------ */
+openBtn?.addEventListener("click", openComposer);
+modalClose?.addEventListener("click", closeComposer);
+modal?.addEventListener("click", (e) => { if (e.target === modal) closeComposer(); });
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { closeComposer(); hideInfo(); }
+});
+
+modalSend?.addEventListener("click", async () => {
+  const text = (modalText.value || "").trim();
+  if (!text) return;
+  modalSend.disabled = true;
+  const original = modalHint.textContent;
+  modalHint.textContent = "posting…";
+  try {
+    const res = await fetch("/api/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      modalHint.textContent = data.error || "error";
+      return;
+    }
+    modalText.value = "";
+    modalHint.textContent = data.created === false ? "already posted today" : "posted ✓";
+    // If the info panel happens to be showing this same city, refresh its messages.
+    if (currentStar && currentStar.city && currentStar.city.toLowerCase() === (data.city || "").toLowerCase()) {
+      renderMessages(data.messages || []);
+    }
+    setTimeout(closeComposer, 900);
+  } catch {
+    modalHint.textContent = "network error";
+  } finally {
+    modalSend.disabled = false;
+    setTimeout(() => { modalHint.textContent = original; }, 3000);
+  }
+});
+
+/* ------------------------------ fetchers ----------------------------- */
 
 async function fetchFact(city, signal) {
   if (!city) return null;
@@ -239,13 +234,12 @@ async function fetchMessages(city, signal) {
   return data.messages || [];
 }
 
+/* ------------------------------- helpers ---------------------------- */
+
 function escapeHtml(s) {
   return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function relativeTime(ts) {
@@ -258,13 +252,10 @@ function relativeTime(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-// Minimal country-code → name map (only the ones we care about; falls back to code).
 const COUNTRIES = {
   IN: "India", US: "United States", GB: "United Kingdom", DE: "Germany",
   FR: "France", JP: "Japan", CN: "China", BR: "Brazil", AU: "Australia",
   CA: "Canada", ZA: "South Africa", RU: "Russia", SG: "Singapore", AE: "UAE",
   EG: "Egypt", KE: "Kenya", IS: "Iceland", PL: "Poland", AR: "Argentina",
 };
-function countryName(code) {
-  return COUNTRIES[code] || code;
-}
+function countryName(code) { return COUNTRIES[code] || code; }
