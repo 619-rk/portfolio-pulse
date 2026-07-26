@@ -3,37 +3,31 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Portfolio Pulse</title>
+  <meta name="theme-color" content="#05070d" />
+  <title>Constellation</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <header>
-    <h1>📈 Portfolio Pulse</h1>
-    <p class="tag">Your watchlist, live from the edge.</p>
-  </header>
+  <canvas id="scene"></canvas>
 
-  <main>
-    <section class="add">
-      <input id="ticker" type="text" placeholder="Add ticker (e.g. AAPL)" autocomplete="off" />
-      <button id="add-btn">Add</button>
-    </section>
+  <div id="hud">
+    <div class="row title">✦ constellation</div>
+    <div class="row"><span class="k">visitors</span><span class="v" id="visitor-count">—</span></div>
+    <div class="row"><span class="k">you</span><span class="v" id="visitor-loc">locating…</span></div>
+    <div class="row"><span class="k">edge</span><span class="v" id="edge-colo">—</span></div>
+  </div>
 
-    <section class="list">
-      <table>
-        <thead>
-          <tr><th>Ticker</th><th>Price</th><th>Change</th><th></th></tr>
-        </thead>
-        <tbody id="rows">
-          <tr class="empty"><td colspan="4">No tickers yet — add one above.</td></tr>
-        </tbody>
-      </table>
-    </section>
-  </main>
+  <div id="tooltip" class="hidden"></div>
 
-  <footer>
-    <small>Milestone 1 · static shell · no backend yet</small>
-  </footer>
+  <div id="hint">move your cursor · click a star</div>
 
-  <script src="./app.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>
