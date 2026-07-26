@@ -19,7 +19,20 @@
 
   <div id="tooltip" class="hidden"></div>
 
-  <div id="hint">move your cursor · click a star</div>
+  <!-- Info panel — slides in when a star is clicked. -->
+  <aside id="info" class="hidden" aria-hidden="true">
+    <button id="info-close" aria-label="Close">×</button>
+    <div class="info-meta">
+      <div id="info-city">—</div>
+      <div id="info-sub" class="sub">—</div>
+    </div>
+    <div id="info-body" class="body">
+      <div class="loading">reading up…</div>
+    </div>
+    <a id="info-link" href="#" target="_blank" rel="noopener" hidden>read more →</a>
+  </aside>
+
+  <div id="hint">drag to rotate · click a star</div>
 
   <script type="importmap">
     {

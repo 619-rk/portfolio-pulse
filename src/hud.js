@@ -1,4 +1,4 @@
-// HUD helpers + tooltip control.
+// HUD + tooltip + info panel controls.
 
 export function initHud({ visitorCount, city, colo }) {
   setCount(visitorCount);
@@ -21,6 +21,8 @@ export function setColo(colo) {
   if (el) el.textContent = colo ?? "—";
 }
 
+/* ------------------------------ tooltip ------------------------------ */
+
 const tip = () => document.getElementById("tooltip");
 
 export function showTooltip(star, clientX, clientY) {
@@ -39,6 +41,78 @@ export function hideTooltip() {
   if (el) el.classList.add("hidden");
 }
 
+/* ----------------------------- info panel ---------------------------- */
+
+let currentFactController = null;
+
+export function showInfo(star) {
+  const panel = document.getElementById("info");
+  const cityEl = document.getElementById("info-city");
+  const subEl  = document.getElementById("info-sub");
+  const bodyEl = document.getElementById("info-body");
+  const linkEl = document.getElementById("info-link");
+  if (!panel) return;
+
+  cityEl.textContent = star.city || "Somewhere";
+  const parts = [];
+  if (star.country) parts.push(countryName(star.country));
+  parts.push(star.ts ? relativeTime(star.ts) : "seed city");
+  parts.push(`${star.lat.toFixed(2)}°, ${star.lon.toFixed(2)}°`);
+  subEl.textContent = parts.join(" · ");
+
+  bodyEl.innerHTML = `<div class="loading">reading up…</div>`;
+  linkEl.hidden = true;
+
+  panel.classList.remove("hidden");
+  panel.setAttribute("aria-hidden", "false");
+
+  // Cancel any in-flight fact request from a previous click.
+  if (currentFactController) currentFactController.abort();
+  currentFactController = new AbortController();
+  fetchFact(star.city, currentFactController.signal)
+    .then((fact) => {
+      if (!fact) {
+        bodyEl.innerHTML = `<em>No entry found for this place — try another star.</em>`;
+        return;
+      }
+      bodyEl.textContent = fact.extract;
+      if (fact.url) {
+        linkEl.href = fact.url;
+        linkEl.hidden = false;
+      }
+    })
+    .catch((err) => {
+      if (err.name === "AbortError") return;
+      bodyEl.innerHTML = `<em>Couldn't load a fact right now.</em>`;
+    });
+}
+
+export function hideInfo() {
+  const panel = document.getElementById("info");
+  if (!panel) return;
+  panel.classList.add("hidden");
+  panel.setAttribute("aria-hidden", "true");
+  if (currentFactController) currentFactController.abort();
+}
+
+document.getElementById("info-close")?.addEventListener("click", hideInfo);
+
+/* ------------------------------ helpers ------------------------------ */
+
+async function fetchFact(city, signal) {
+  if (!city) return null;
+  // Wikipedia's REST summary API — free, no key, has CORS.
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(city)}`;
+  const res = await fetch(url, { signal, headers: { accept: "application/json" } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data.extract) return null;
+  return {
+    extract: data.extract,
+    url: data.content_urls?.desktop?.page,
+  };
+}
+
 function relativeTime(ts) {
   if (!ts) return "seed city";
   const nowS = Math.floor(Date.now() / 1000);
@@ -47,4 +121,15 @@ function relativeTime(ts) {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+// Minimal country-code → name map (only the ones we care about; falls back to code).
+const COUNTRIES = {
+  IN: "India", US: "United States", GB: "United Kingdom", DE: "Germany",
+  FR: "France", JP: "Japan", CN: "China", BR: "Brazil", AU: "Australia",
+  CA: "Canada", ZA: "South Africa", RU: "Russia", SG: "Singapore", AE: "UAE",
+  EG: "Egypt", KE: "Kenya", IS: "Iceland", PL: "Poland", AR: "Argentina",
+};
+function countryName(code) {
+  return COUNTRIES[code] || code;
 }

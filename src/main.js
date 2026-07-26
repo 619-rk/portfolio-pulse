@@ -1,39 +1,40 @@
-// Constellation — entry point (M5).
+// Constellation — entry point.
+// M5+: drag-to-rotate, click star → info panel with Wikipedia fact.
 
 import * as THREE from "three";
 import { createScene, pointer } from "./scene.js";
 import { createStarfield } from "./stars.js";
-import { initHud, setCount, setLocation, setColo, showTooltip, hideTooltip } from "./hud.js";
+import {
+  initHud, setCount, setLocation, setColo,
+  showTooltip, hideTooltip, showInfo, hideInfo,
+} from "./hud.js";
 
 const canvas = document.getElementById("scene");
-const { scene, camera, renderer, onResize, onPointerMove, flyTo, tickCamera } = createScene(canvas);
+const {
+  scene, camera, renderer, world,
+  onResize, onPointerMove, onPointerDown, onPointerUp,
+  tickWorld,
+} = createScene(canvas);
 
 initHud({ visitorCount: "—", city: "locating…", colo: "—" });
 
 bootstrap();
 
 async function bootstrap() {
-  // 1) POST creates our star if new; response includes yourStarId so we can highlight it.
   let payload;
   try {
-    const res = await fetch("/api/stars", { method: "POST", headers: { accept: "application/json" } });
+    const res = await fetch("/api/stars", { method: "POST" });
     payload = await res.json();
-  } catch (err) {
-    console.warn("POST failed, falling back to GET.", err);
-    try {
-      payload = await (await fetch("/api/stars")).json();
-    } catch (e2) {
-      console.error("GET failed too.", e2);
-      payload = { stars: [], you: {}, total: 0 };
-    }
+  } catch {
+    try { payload = await (await fetch("/api/stars")).json(); }
+    catch { payload = { stars: [], you: {}, total: 0 }; }
   }
 
   const stars = payload.stars || [];
   const yourId = payload.yourStarId ?? findMyStarId(stars, payload.you);
 
-  // Create the field asynchronously (waits for the land mask to load).
   const field = await createStarfield(stars, yourId);
-  scene.add(field.mesh);
+  world.add(field.mesh);
 
   setCount(payload.total ?? stars.length);
   setLocation(
@@ -47,62 +48,73 @@ async function bootstrap() {
   startLoop(field);
 }
 
-/* ----------------------- hover + click interaction ----------------------- */
-
 function setupInteraction(field, stars) {
   const raycaster = new THREE.Raycaster();
-  raycaster.params.Points.threshold = 0.03;
+  raycaster.params.Points.threshold = 0.04;
 
-  let lastHoverIdx = -1;
+  // Track mouse-down position so we can distinguish click vs drag.
+  let downX = 0, downY = 0, downTime = 0;
 
   function pickIndex() {
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObject(field.fg.mesh);
-    if (!hits.length) return -1;
-    return hits[0].index;
+    return hits.length ? hits[0].index : -1;
   }
 
+  window.addEventListener("pointerdown", (e) => {
+    downX = e.clientX; downY = e.clientY; downTime = performance.now();
+    onPointerDown(e);
+  });
+
   window.addEventListener("pointermove", (e) => {
+    onPointerMove(e);
+    // Hover tooltip when not dragging.
+    if (e.buttons) return; // ignore during drag
     const idx = pickIndex();
     if (idx === -1) {
-      if (lastHoverIdx !== -1) hideTooltip();
-      lastHoverIdx = -1;
-      canvas.style.cursor = "crosshair";
+      hideTooltip();
+      canvas.classList.remove("pointing");
       return;
     }
-    canvas.style.cursor = "pointer";
-    lastHoverIdx = idx;
+    canvas.classList.add("pointing");
     const star = stars[idx];
     if (star) showTooltip(star, e.clientX, e.clientY);
   });
 
-  window.addEventListener("click", () => {
-    const idx = pickIndex();
-    if (idx === -1) return;
-    const star = stars[idx];
-    if (!star) return;
-    // Compute the star's WORLD-space position (accounting for group rotation).
-    const local = new THREE.Vector3().fromBufferAttribute(
-      field.fg.geometry.getAttribute("position"),
-      idx
-    );
-    const world = local.clone().applyMatrix4(field.mesh.matrixWorld);
-    flyTo(world, 1500);
+  window.addEventListener("pointerup", (e) => {
+    onPointerUp(e);
+    const dx = e.clientX - downX;
+    const dy = e.clientY - downY;
+    const dt = performance.now() - downTime;
+    const moved = Math.hypot(dx, dy);
+    // Treat as click only if it was short & didn't move much.
+    if (moved < 6 && dt < 400) {
+      const idx = pickIndex();
+      if (idx !== -1) {
+        const star = stars[idx];
+        if (star) {
+          hideTooltip();
+          showInfo(star);
+          return;
+        }
+      }
+      // Click on empty space → close panel.
+      hideInfo();
+    }
+  });
+
+  // Esc closes the panel.
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideInfo();
   });
 }
-
-/* ------------------------------- render loop ---------------------------- */
 
 function startLoop(field) {
   const start = performance.now();
   function tick() {
     const t = (performance.now() - start) / 1000;
     field.update(t);
-    // Rotation continues underneath, unless we're mid-fly (paused via tickCamera).
-    scene.rotation.y = t * 0.02;
-    scene.rotation.x = Math.sin(t * 0.05) * 0.05;
-    scene.updateMatrixWorld();
-    tickCamera();
+    tickWorld();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
   }
@@ -110,18 +122,13 @@ function startLoop(field) {
 }
 
 window.addEventListener("resize", onResize);
-window.addEventListener("pointermove", onPointerMove);
 
-/* --------------------------------- helpers ------------------------------- */
-
-// Fallback for older cache-hit responses that didn't include yourStarId:
-// match by city + country + freshest timestamp.
 function findMyStarId(stars, you) {
   if (!you?.city) return null;
   const candidates = stars.filter(
-    (s) => s.city && s.city.toLowerCase() === you.city.toLowerCase()
+    (s) => s.city?.toLowerCase() === you.city.toLowerCase()
              && s.country === you.country
-             && s.ts // real, not seed
+             && s.ts
   );
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.ts - a.ts);
