@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Portfolio Pulse</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>📈 Portfolio Pulse</h1>
+    <p class="tag">Your watchlist, live from the edge.</p>
+  </header>
+
+  <main>
+    <section class="add">
+      <input id="ticker" type="text" placeholder="Add ticker (e.g. AAPL)" autocomplete="off" />
+      <button id="add-btn">Add</button>
+    </section>
+
+    <section class="list">
+      <table>
+        <thead>
+          <tr><th>Ticker</th><th>Price</th><th>Change</th><th></th></tr>
+        </thead>
+        <tbody id="rows">
+          <tr class="empty"><td colspan="4">No tickers yet — add one above.</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer>
+    <small>Milestone 1 · static shell · no backend yet</small>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
