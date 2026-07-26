@@ -1,10 +1,6 @@
-// Three.js scene + interactive drag-to-rotate controls with inertia + post-processing bloom.
+// Three.js scene + interactive drag-to-rotate controls with inertia.
 
 import * as THREE from "three";
-import { EffectComposer } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/OutputPass.js";
 
 export const pointer = new THREE.Vector2(0, 0);
 
@@ -18,27 +14,14 @@ export function createScene(canvas) {
     0.1,
     100
   );
-  // 5% farther out than the previous default (was 3.2).
   const DEFAULT_Z = 3.36;
-  const MIN_Z = 2.2;   // closest you can zoom in
-  const MAX_Z = 6.0;   // farthest you can zoom out
+  const MIN_Z = 2.2;
+  const MAX_Z = 6.0;
   camera.position.set(0, 0, DEFAULT_Z);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
-
-  // Post-processing: subtle bloom so bright stars glow softly.
-  const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    /* strength */ 0.9,
-    /* radius   */ 0.6,
-    /* threshold*/ 0.35
-  );
-  composer.addPass(bloom);
-  composer.addPass(new OutputPass());
 
   const world = new THREE.Group();
   scene.add(world);
@@ -60,7 +43,6 @@ export function createScene(canvas) {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight, false);
-    composer.setSize(window.innerWidth, window.innerHeight);
   }
 
   function onPointerDown(e) {
@@ -137,8 +119,12 @@ export function createScene(canvas) {
     composer.render();
   }
 
+  function render() {
+    renderer.render(scene, camera);
+  }
+
   return {
-    scene, camera, renderer, world, composer, render,
+    scene, camera, renderer, world, render,
     onResize, onPointerMove, onPointerDown, onPointerUp, onWheel,
     tickWorld,
   };
