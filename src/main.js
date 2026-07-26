@@ -1,9 +1,10 @@
 // Constellation — entry point.
-// M5+: drag-to-rotate, click star → info panel with Wikipedia fact.
+// drag-to-rotate + bloom + click star → info panel with Wikipedia + shockwave ring.
 
 import * as THREE from "three";
 import { createScene, pointer } from "./scene.js";
 import { createStarfield } from "./stars.js";
+import { createShockwaveLayer } from "./shockwave.js";
 import {
   initHud, setCount, setPlaces, setLocation, setColo,
   showTooltip, hideTooltip, showInfo, hideInfo,
@@ -11,7 +12,7 @@ import {
 
 const canvas = document.getElementById("scene");
 const {
-  scene, camera, renderer, world,
+  scene, camera, renderer, world, render,
   onResize, onPointerMove, onPointerDown, onPointerUp,
   tickWorld,
 } = createScene(canvas);
@@ -36,8 +37,10 @@ async function bootstrap() {
   const field = await createStarfield(stars, yourId);
   world.add(field.mesh);
 
-  // Total visits = real visitor stars (excluding seed cities).
-  // Unique places = distinct city+country pairs among real visitors.
+  // Shockwave layer sits inside the world so waves rotate with the globe.
+  const shocks = createShockwaveLayer();
+  world.add(shocks.mesh);
+
   const realStars = stars.filter((s) => s.ts);
   const uniquePlaces = new Set(
     realStars.map((s) => `${(s.city || "").toLowerCase()}|${s.country || ""}`)
@@ -52,15 +55,14 @@ async function bootstrap() {
   );
   setColo(payload.you?.colo ?? "—");
 
-  setupInteraction(field, stars);
-  startLoop(field);
+  setupInteraction(field, stars, shocks);
+  startLoop(field, shocks);
 }
 
-function setupInteraction(field, stars) {
+function setupInteraction(field, stars, shocks) {
   const raycaster = new THREE.Raycaster();
   raycaster.params.Points.threshold = 0.04;
 
-  // Track mouse-down position so we can distinguish click vs drag.
   let downX = 0, downY = 0, downTime = 0;
 
   function pickIndex() {
@@ -76,8 +78,7 @@ function setupInteraction(field, stars) {
 
   window.addEventListener("pointermove", (e) => {
     onPointerMove(e);
-    // Hover tooltip when not dragging.
-    if (e.buttons) return; // ignore during drag
+    if (e.buttons) return;
     const idx = pickIndex();
     if (idx === -1) {
       hideTooltip();
@@ -95,7 +96,6 @@ function setupInteraction(field, stars) {
     const dy = e.clientY - downY;
     const dt = performance.now() - downTime;
     const moved = Math.hypot(dx, dy);
-    // Treat as click only if it was short & didn't move much.
     if (moved < 6 && dt < 400) {
       const idx = pickIndex();
       if (idx !== -1) {
@@ -103,27 +103,27 @@ function setupInteraction(field, stars) {
         if (star) {
           hideTooltip();
           showInfo(star);
+          shocks.spawnAt(star.lat, star.lon);
           return;
         }
       }
-      // Click on empty space → close panel.
       hideInfo();
     }
   });
 
-  // Esc closes the panel.
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideInfo();
   });
 }
 
-function startLoop(field) {
+function startLoop(field, shocks) {
   const start = performance.now();
   function tick() {
     const t = (performance.now() - start) / 1000;
     field.update(t);
+    shocks.update(t);
     tickWorld();
-    renderer.render(scene, camera);
+    render();
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);

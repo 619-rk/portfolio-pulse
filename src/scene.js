@@ -1,12 +1,12 @@
-// Three.js scene + interactive drag-to-rotate controls with inertia.
-//
-// The world lives inside a "world" group that we rotate directly. This is
-// simpler than OrbitControls and gives us full control over damping and
-// idle auto-drift so the globe never sits perfectly still.
+// Three.js scene + interactive drag-to-rotate controls with inertia + post-processing bloom.
 
 import * as THREE from "three";
+import { EffectComposer } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/OutputPass.js";
 
-export const pointer = new THREE.Vector2(0, 0); // NDC pointer for raycasting
+export const pointer = new THREE.Vector2(0, 0);
 
 export function createScene(canvas) {
   const scene = new THREE.Scene();
@@ -24,40 +24,40 @@ export function createScene(canvas) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
 
-  // The world group — everything that should rotate lives here.
+  // Post-processing: subtle bloom so bright stars glow softly.
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    /* strength */ 0.9,
+    /* radius   */ 0.6,
+    /* threshold*/ 0.35
+  );
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
   const world = new THREE.Group();
   scene.add(world);
 
-  // Rotation state
   const state = {
-    rotX: 0,
-    rotY: 0,
-    velX: 0,
-    velY: 0.0015,          // slow autonomous drift
+    rotX: 0, rotY: 0,
+    velX: 0, velY: 0.0015,
     dragging: false,
-    lastX: 0,
-    lastY: 0,
+    lastX: 0, lastY: 0,
     lastMoveTime: 0,
     lastInteractionTime: 0,
-    // Fly-to camera state (kept but rarely used; click now opens the info panel)
-    flying: false,
-    flyStart: 0,
-    flyDuration: 0,
-    flyFrom: new THREE.Vector3(),
-    flyTo: new THREE.Vector3(),
   };
 
-  const DAMPING = 0.94;         // per-frame velocity multiplier after release
-  const DRIFT_SPEED = 0.0008;   // idle drift speed
-  const IDLE_MS = 2500;         // ms after last interaction before drift resumes
+  const DAMPING = 0.94;
+  const DRIFT_SPEED = 0.0008;
+  const IDLE_MS = 2500;
 
   function onResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight, false);
+    composer.setSize(window.innerWidth, window.innerHeight);
   }
-
-  /* --------------------------- input handling --------------------------- */
 
   function onPointerDown(e) {
     state.dragging = true;
@@ -75,11 +75,9 @@ export function createScene(canvas) {
     state.dragging = false;
     canvas.classList.remove("grabbing");
     canvas.releasePointerCapture?.(e.pointerId);
-    // Velocity was set on the last move; keep it, damping handles decay.
   }
 
   function onPointerMove(e) {
-    // Always update NDC for raycasting
     pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 
@@ -91,17 +89,12 @@ export function createScene(canvas) {
     state.lastX = e.clientX;
     state.lastY = e.clientY;
 
-    // Rotation delta
     const rY = dx * 0.005;
     const rX = dy * 0.005;
-
     state.rotY += rY;
     state.rotX += rX;
-
-    // Clamp X so we don't roll over the poles
     state.rotX = Math.max(-Math.PI / 2 + 0.2, Math.min(Math.PI / 2 - 0.2, state.rotX));
 
-    // Compute velocity for inertial fling based on recent movement.
     const dt = Math.max(1, now - state.lastMoveTime);
     state.velY = rY * (16 / dt);
     state.velX = rX * (16 / dt);
@@ -112,12 +105,10 @@ export function createScene(canvas) {
   function tickWorld() {
     const now = performance.now();
     if (!state.dragging) {
-      // Apply inertia
       state.rotY += state.velY;
       state.rotX += state.velX;
       state.velY *= DAMPING;
       state.velX *= DAMPING;
-      // Tiny floor so drift never truly stops.
       if (Math.abs(state.velY) < DRIFT_SPEED && now - state.lastInteractionTime > IDLE_MS) {
         state.velY = DRIFT_SPEED;
       }
@@ -125,32 +116,16 @@ export function createScene(canvas) {
     }
     world.rotation.y = state.rotY;
     world.rotation.x = state.rotX;
-    tickFly();
     world.updateMatrixWorld();
   }
 
-  /* ----------------------------- fly-to camera ---------------------------- */
-
-  function flyTo(target, durationMs = 1400) {
-    state.flying = true;
-    state.flyStart = performance.now();
-    state.flyDuration = durationMs;
-    state.flyFrom.copy(camera.position);
-    state.flyTo.copy(target).normalize().multiplyScalar(2.6);
-  }
-
-  function tickFly() {
-    if (!state.flying) return;
-    const t = Math.min(1, (performance.now() - state.flyStart) / state.flyDuration);
-    const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    camera.position.lerpVectors(state.flyFrom, state.flyTo, e);
-    camera.lookAt(0, 0, 0);
-    if (t >= 1) state.flying = false;
+  function render() {
+    composer.render();
   }
 
   return {
-    scene, camera, renderer, world,
+    scene, camera, renderer, world, composer, render,
     onResize, onPointerMove, onPointerDown, onPointerUp,
-    tickWorld, flyTo,
+    tickWorld,
   };
 }
