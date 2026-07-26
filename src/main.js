@@ -13,7 +13,7 @@ import {
 const canvas = document.getElementById("scene");
 const {
   scene, camera, renderer, world, render,
-  onResize, onPointerMove, onPointerDown, onPointerUp,
+  onResize, onPointerMove, onPointerDown, onPointerUp, onWheel,
   tickWorld,
 } = createScene(canvas);
 
@@ -130,6 +130,7 @@ function startLoop(field, shocks) {
 }
 
 window.addEventListener("resize", onResize);
+canvas.addEventListener("wheel", onWheel, { passive: false });
 
 function findMyStarId(stars, you) {
   if (!you?.city) return null;

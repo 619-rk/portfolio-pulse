@@ -18,7 +18,11 @@ export function createScene(canvas) {
     0.1,
     100
   );
-  camera.position.set(0, 0, 3.2);
+  // 5% farther out than the previous default (was 3.2).
+  const DEFAULT_Z = 3.36;
+  const MIN_Z = 2.2;   // closest you can zoom in
+  const MAX_Z = 6.0;   // farthest you can zoom out
+  camera.position.set(0, 0, DEFAULT_Z);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -102,6 +106,16 @@ export function createScene(canvas) {
     state.lastInteractionTime = now;
   }
 
+  // Wheel zoom (mouse wheel + trackpad pinch on macOS).
+  // ctrlKey during a wheel event = pinch gesture; use a larger step there.
+  function onWheel(e) {
+    e.preventDefault();
+    const step = e.ctrlKey ? 0.02 : 0.0015; // pinch feels bigger than one detent
+    const factor = 1 + e.deltaY * step;
+    camera.position.z = Math.max(MIN_Z, Math.min(MAX_Z, camera.position.z * factor));
+    state.lastInteractionTime = performance.now();
+  }
+
   function tickWorld() {
     const now = performance.now();
     if (!state.dragging) {
@@ -125,7 +139,7 @@ export function createScene(canvas) {
 
   return {
     scene, camera, renderer, world, composer, render,
-    onResize, onPointerMove, onPointerDown, onPointerUp,
+    onResize, onPointerMove, onPointerDown, onPointerUp, onWheel,
     tickWorld,
   };
 }
