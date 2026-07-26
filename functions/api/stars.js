@@ -33,15 +33,15 @@ const SEED_CITIES = [
 
 export async function onRequestGet({ request, env }) {
   const stored = await readStars(env);
-  // Always show seeds + real visitors together — seeds are our "known cities"
-  // backdrop so the sphere never looks empty.
+  // Seeds always shown alongside real visitors.
   const stars = [...SEED_CITIES, ...stored];
 
   return json({
     stars,
     you: readVisitorGeo(request),
     total: stars.length,
-    real: stored.length, // only real visitors, seeds excluded
+    real: stored.length,
+    seeds: SEED_CITIES.length,
   });
 }
 
