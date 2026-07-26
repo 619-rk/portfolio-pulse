@@ -65,8 +65,8 @@ function makeBackground(n) {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         float f = sin(uTime * 0.7 + aPhase) * 0.5 + 0.5;
-        vFlicker = 0.35 + f * 0.4;
-        gl_PointSize = 2.2 * uPixelRatio * (1.0 / -mv.z);
+        vFlicker = 0.6 + f * 0.4;
+        gl_PointSize = 4.0 * uPixelRatio * (1.0 / -mv.z);
       }
     `,
     fragmentShader: /* glsl */ `
@@ -75,9 +75,9 @@ function makeBackground(n) {
         vec2 uv = gl_PointCoord - 0.5;
         float d = length(uv);
         float alpha = smoothstep(0.5, 0.0, d);
-        // Ember red, faint.
-        vec3 col = vec3(0.85, 0.18, 0.15);
-        gl_FragColor = vec4(col, alpha * vFlicker * 0.55);
+        // Ember red — visible but not garish.
+        vec3 col = vec3(1.0, 0.28, 0.20);
+        gl_FragColor = vec4(col, alpha * vFlicker);
       }
     `,
   });
