@@ -57,6 +57,7 @@ export function showInfo(star) {
   const subEl  = document.getElementById("info-sub");
   const bodyEl = document.getElementById("info-body");
   const linkEl = document.getElementById("info-link");
+  const heroEl = document.getElementById("info-hero");
   if (!panel) return;
 
   cityEl.textContent = star.city || "Somewhere";
@@ -68,11 +69,12 @@ export function showInfo(star) {
 
   bodyEl.innerHTML = `<div class="loading">reading up…</div>`;
   linkEl.hidden = true;
+  heroEl.style.backgroundImage = "";
+  heroEl.classList.add("empty");
 
   panel.classList.remove("hidden");
   panel.setAttribute("aria-hidden", "false");
 
-  // Cancel any in-flight fact request from a previous click.
   if (currentFactController) currentFactController.abort();
   currentFactController = new AbortController();
   fetchFact(star.city, currentFactController.signal)
@@ -85,6 +87,10 @@ export function showInfo(star) {
       if (fact.url) {
         linkEl.href = fact.url;
         linkEl.hidden = false;
+      }
+      if (fact.image) {
+        heroEl.style.backgroundImage = `url("${fact.image}")`;
+        heroEl.classList.remove("empty");
       }
     })
     .catch((err) => {
@@ -116,6 +122,7 @@ async function fetchFact(city, signal) {
   return {
     extract: data.extract,
     url: data.content_urls?.desktop?.page,
+    image: data.originalimage?.source || data.thumbnail?.source || null,
   };
 }
 

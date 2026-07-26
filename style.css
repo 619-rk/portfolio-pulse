@@ -85,9 +85,8 @@ html, body {
   position: fixed;
   top: 20px;
   right: 20px;
-  width: min(360px, calc(100vw - 40px));
+  width: min(380px, calc(100vw - 40px));
   max-height: calc(100vh - 40px);
-  padding: 20px 22px 22px;
   background: rgba(10, 13, 20, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 12px;
@@ -98,7 +97,9 @@ html, body {
   transform: translateX(0);
   transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.25s ease;
   opacity: 1;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 #info.hidden {
   opacity: 0;
@@ -106,24 +107,46 @@ html, body {
   pointer-events: none;
 }
 
+.hero {
+  height: 160px;
+  background-size: cover;
+  background-position: center;
+  background-color: #0d1220;
+  position: relative;
+  flex-shrink: 0;
+}
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(10,13,20,0.0) 0%, rgba(10,13,20,0.85) 100%);
+}
+.hero.empty {
+  height: 0;
+}
+
 #info-close {
   position: absolute;
   top: 8px;
   right: 10px;
-  background: transparent;
-  border: 0;
-  color: #6b7690;
-  font-size: 22px;
+  background: rgba(10, 13, 20, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: #cfd6e4;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  z-index: 2;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
-#info-close:hover { color: #e8ecf5; }
+#info-close:hover { color: #fff; background: rgba(30, 40, 60, 0.7); }
 
 .info-meta {
-  padding-bottom: 12px;
-  margin-bottom: 12px;
+  padding: 18px 22px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 #info-city {
@@ -143,11 +166,13 @@ html, body {
 }
 
 #info-body {
+  padding: 14px 22px 4px;
   font-family: Georgia, "Iowan Old Style", serif;
   font-size: 14px;
   line-height: 1.55;
   color: #cfd6e4;
   letter-spacing: 0;
+  overflow-y: auto;
 }
 
 #info-body .loading {
@@ -160,12 +185,13 @@ html, body {
 
 #info-link {
   display: inline-block;
-  margin-top: 14px;
+  margin: 0 22px 22px;
   color: #7ec9ff;
   text-decoration: none;
   font-size: 11px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
+  flex-shrink: 0;
 }
 #info-link:hover { color: #cfe8ff; }
 
