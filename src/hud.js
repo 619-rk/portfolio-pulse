@@ -12,11 +12,11 @@ export function initHud({ visitorCount, places, city, colo }) {
 /** Called from main.js once we know the visitor's canonical city. */
 export function setVisitorCity(city) {
   visitorCityCache = city || null;
-  // Fill the composer's city name and enable the HUD button when we know where we are.
   const cityLabel = document.getElementById("composer-city");
   if (cityLabel) cityLabel.textContent = city ? city.toLowerCase() : "your city";
+  // Do NOT disable the button — button always works; server enforces geo.
   const btn = document.getElementById("hud-compose");
-  if (btn) btn.disabled = !city;
+  if (btn) btn.disabled = false;
 }
 
 export function setCount(n) {
@@ -160,7 +160,13 @@ const modalClose = document.getElementById("composer-close");
 const openBtn    = document.getElementById("hud-compose");
 
 function openComposer() {
-  if (!modal || !visitorCityCache) return;
+  if (!modal) return;
+  // If we don't know the visitor's city yet (bootstrap still fetching), keep the
+  // button enabled anyway — the server will still identify them by IP on POST.
+  const cityLabel = document.getElementById("composer-city");
+  if (cityLabel && !cityLabel.textContent.trim()) {
+    cityLabel.textContent = visitorCityCache ? visitorCityCache.toLowerCase() : "your city";
+  }
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
   setTimeout(() => modalText?.focus(), 50);
