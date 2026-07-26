@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { createScene, pointer } from "./scene.js";
 import { createStarfield } from "./stars.js";
 import {
-  initHud, setCount, setPlaces, setLocation, setColo,
+  initHud, setCount, setPlaces, setLocation, setColo, setVisitorCity,
   showTooltip, hideTooltip, showInfo, hideInfo,
 } from "./hud.js";
 
@@ -49,6 +49,7 @@ async function bootstrap() {
       : "unknown"
   );
   setColo(payload.you?.colo ?? "—");
+  setVisitorCity(payload.you?.city || null);
 
   setupInteraction(field, stars);
   startLoop(field);
