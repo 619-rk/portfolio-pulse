@@ -33,12 +33,15 @@ const SEED_CITIES = [
 
 export async function onRequestGet({ request, env }) {
   const stored = await readStars(env);
-  const stars = stored.length ? stored : SEED_CITIES;
+  // Always show seeds + real visitors together — seeds are our "known cities"
+  // backdrop so the sphere never looks empty.
+  const stars = [...SEED_CITIES, ...stored];
 
   return json({
     stars,
     you: readVisitorGeo(request),
     total: stars.length,
+    real: stored.length, // only real visitors, seeds excluded
   });
 }
 
@@ -58,10 +61,12 @@ export async function onRequestPost({ request, env }) {
   const existing = await readStars(env);
 
   if (already) {
+    const stars = [...SEED_CITIES, ...existing];
     return json({
-      stars: existing.length ? existing : SEED_CITIES,
+      stars,
       you,
-      total: (existing.length ? existing : SEED_CITIES).length,
+      total: stars.length,
+      real: existing.length,
       created: false,
     });
   }
@@ -83,10 +88,12 @@ export async function onRequestPost({ request, env }) {
     env.VISITED_IP.put(ipHash, "1", { expirationTtl: IP_TTL_SECONDS }),
   ]);
 
+  const stars = [...SEED_CITIES, ...next];
   return json({
-    stars: next,
+    stars,
     you,
-    total: next.length,
+    total: stars.length,
+    real: next.length,
     created: true,
     yourStarId: star.id,
   });
