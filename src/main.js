@@ -1,11 +1,9 @@
 // Constellation — entry point.
-// M5+: drag-to-rotate, nebula bg, click star → info panel + arcs to neighbors.
+// M5+: drag-to-rotate, click star → info panel with Wikipedia fact.
 
 import * as THREE from "three";
 import { createScene, pointer } from "./scene.js";
 import { createStarfield } from "./stars.js";
-import { createNebula } from "./nebula.js";
-import { createArcLayer } from "./arcs.js";
 import {
   initHud, setCount, setPlaces, setLocation, setColo,
   showTooltip, hideTooltip, showInfo, hideInfo,
@@ -19,10 +17,6 @@ const {
 } = createScene(canvas);
 
 initHud({ visitorCount: "—", places: "—", city: "locating…", colo: "—" });
-
-// Nebula lives directly in the scene (doesn't rotate with the globe).
-const nebula = createNebula();
-scene.add(nebula.mesh);
 
 bootstrap();
 
@@ -42,14 +36,13 @@ async function bootstrap() {
   const field = await createStarfield(stars, yourId);
   world.add(field.mesh);
 
-  // Arcs only make sense between REAL visited cities (not the seed defaults).
+  // Total visits = real visitor stars (excluding seed cities).
+  // Unique places = distinct city+country pairs among real visitors.
   const realStars = stars.filter((s) => s.ts);
-  const arcs = createArcLayer(realStars);
-  world.add(arcs.mesh);
-
   const uniquePlaces = new Set(
     realStars.map((s) => `${(s.city || "").toLowerCase()}|${s.country || ""}`)
   ).size;
+
   setCount(payload.real ?? realStars.length);
   setPlaces(uniquePlaces);
   setLocation(
@@ -59,14 +52,15 @@ async function bootstrap() {
   );
   setColo(payload.you?.colo ?? "—");
 
-  setupInteraction(field, stars, arcs, realStars);
-  startLoop(field, arcs);
+  setupInteraction(field, stars);
+  startLoop(field);
 }
 
-function setupInteraction(field, stars, arcs, realStars) {
+function setupInteraction(field, stars) {
   const raycaster = new THREE.Raycaster();
   raycaster.params.Points.threshold = 0.04;
 
+  // Track mouse-down position so we can distinguish click vs drag.
   let downX = 0, downY = 0, downTime = 0;
 
   function pickIndex() {
@@ -82,7 +76,8 @@ function setupInteraction(field, stars, arcs, realStars) {
 
   window.addEventListener("pointermove", (e) => {
     onPointerMove(e);
-    if (e.buttons) return;
+    // Hover tooltip when not dragging.
+    if (e.buttons) return; // ignore during drag
     const idx = pickIndex();
     if (idx === -1) {
       hideTooltip();
@@ -100,6 +95,7 @@ function setupInteraction(field, stars, arcs, realStars) {
     const dy = e.clientY - downY;
     const dt = performance.now() - downTime;
     const moved = Math.hypot(dx, dy);
+    // Treat as click only if it was short & didn't move much.
     if (moved < 6 && dt < 400) {
       const idx = pickIndex();
       if (idx !== -1) {
@@ -107,34 +103,25 @@ function setupInteraction(field, stars, arcs, realStars) {
         if (star) {
           hideTooltip();
           showInfo(star);
-          // Fire arcs — only if this star is a real (non-seed) visit and
-          // there are neighbors to connect to.
-          if (star.ts && realStars.length > 1) {
-            const realIdx = realStars.findIndex((s) => s.id === star.id);
-            if (realIdx !== -1) arcs.spawnFrom(realIdx, 4);
-          } else {
-            arcs.clear();
-          }
           return;
         }
       }
+      // Click on empty space → close panel.
       hideInfo();
-      arcs.clear();
     }
   });
 
+  // Esc closes the panel.
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { hideInfo(); arcs.clear(); }
+    if (e.key === "Escape") hideInfo();
   });
 }
 
-function startLoop(field, arcs) {
+function startLoop(field) {
   const start = performance.now();
   function tick() {
     const t = (performance.now() - start) / 1000;
-    nebula.update(t);
     field.update(t);
-    arcs.update(t);
     tickWorld();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
@@ -142,7 +129,7 @@ function startLoop(field, arcs) {
   requestAnimationFrame(tick);
 }
 
-window.addEventListener("resize", () => { onResize(); nebula.onResize(); });
+window.addEventListener("resize", onResize);
 
 function findMyStarId(stars, you) {
   if (!you?.city) return null;
