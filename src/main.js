@@ -1,5 +1,5 @@
 // Constellation — entry point.
-// Milestone 3: fetch /api/stars for seed data + visitor geo from Cloudflare.
+// Milestone 4: fetch stored stars, then POST our own so a new star appears.
 
 import { createScene } from "./scene.js";
 import { createStarfield } from "./stars.js";
@@ -10,18 +10,28 @@ const { scene, camera, renderer, onResize, onPointerMove } = createScene(canvas)
 
 initHud({ visitorCount: "—", city: "locating…", colo: "—" });
 
-// Kick off the API fetch immediately; the scene renders as soon as we have data.
 bootstrap();
 
 async function bootstrap() {
+  // 1) POST first — creates our star if we haven't been here in 24h,
+  //    and returns the full list including the new addition.
   let payload;
   try {
-    const res = await fetch("/api/stars", { headers: { accept: "application/json" } });
+    const res = await fetch("/api/stars", {
+      method: "POST",
+      headers: { accept: "application/json" },
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     payload = await res.json();
   } catch (err) {
-    console.error("Failed to load /api/stars — falling back to local seed.", err);
-    payload = { stars: fallbackSeed(80), you: {}, total: 80 };
+    console.warn("POST /api/stars failed, falling back to GET.", err);
+    try {
+      const res = await fetch("/api/stars");
+      payload = await res.json();
+    } catch (err2) {
+      console.error("GET /api/stars also failed — using local seed.", err2);
+      payload = { stars: fallbackSeed(80), you: {}, total: 80 };
+    }
   }
 
   const stars = createStarfield(payload.stars);
@@ -34,6 +44,10 @@ async function bootstrap() {
       : "unknown"
   );
   setColo(payload.you?.colo ?? "—");
+
+  if (payload.created) {
+    console.log("✦ new star created at", payload.you?.city, payload.yourStarId);
+  }
 
   startLoop(stars);
 }
@@ -54,7 +68,6 @@ function startLoop(stars) {
 window.addEventListener("resize", onResize);
 window.addEventListener("pointermove", onPointerMove);
 
-// Only used if the API is unreachable (e.g. `python3 -m http.server` local preview).
 function fallbackSeed(n) {
   const out = [];
   for (let i = 0; i < n; i++) {

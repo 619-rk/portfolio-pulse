@@ -1,58 +1,128 @@
-// Pages Function: GET /api/stars
+// Pages Function: /api/stars
 //
-// Milestone 3 — no KV yet. Returns a hardcoded seed list of famous cities so the
-// starfield stops being random and starts being "places on Earth." Also echoes
-// Cloudflare's geo data for the visitor from `request.cf` — this is free and
-// requires no external API.
+// GET  → return all stars from KV (edge-cached, falls back to seed when empty).
+// POST → add the visitor's own star (once per 24h per IP), returns updated list.
 //
-// Docs: https://developers.cloudflare.com/pages/functions/
+// KV bindings (configured in Cloudflare dashboard → Pages → Settings → Bindings):
+//   STARS       — single key "all" holds a JSON array of every visitor star.
+//   VISITED_IP  — key = sha256(ip), value = "1", TTL 24h. Used for dedupe.
+
+const STARS_KEY = "all";
+const MAX_STARS = 5000;      // cap so the blob stays small
+const IP_TTL_SECONDS = 24 * 60 * 60;
 
 const SEED_CITIES = [
-  { id: "seed-1",  city: "Bengaluru",    country: "IN", lat: 12.97, lon: 77.59 },
-  { id: "seed-2",  city: "Tokyo",        country: "JP", lat: 35.68, lon: 139.69 },
-  { id: "seed-3",  city: "Reykjavik",    country: "IS", lat: 64.14, lon: -21.94 },
-  { id: "seed-4",  city: "Cape Town",    country: "ZA", lat: -33.92, lon: 18.42 },
-  { id: "seed-5",  city: "Sao Paulo",    country: "BR", lat: -23.55, lon: -46.63 },
-  { id: "seed-6",  city: "San Francisco",country: "US", lat: 37.77, lon: -122.42 },
-  { id: "seed-7",  city: "London",       country: "GB", lat: 51.51, lon: -0.13 },
-  { id: "seed-8",  city: "Sydney",       country: "AU", lat: -33.87, lon: 151.21 },
-  { id: "seed-9",  city: "Dubai",        country: "AE", lat: 25.20, lon: 55.27 },
-  { id: "seed-10", city: "Berlin",       country: "DE", lat: 52.52, lon: 13.40 },
-  { id: "seed-11", city: "Singapore",    country: "SG", lat: 1.35,  lon: 103.82 },
-  { id: "seed-12", city: "Buenos Aires", country: "AR", lat: -34.60, lon: -58.38 },
-  { id: "seed-13", city: "Toronto",      country: "CA", lat: 43.65, lon: -79.38 },
-  { id: "seed-14", city: "Cairo",        country: "EG", lat: 30.04, lon: 31.24 },
-  { id: "seed-15", city: "Moscow",       country: "RU", lat: 55.75, lon: 37.62 },
-  { id: "seed-16", city: "Delhi",        country: "IN", lat: 28.61, lon: 77.21 },
-  { id: "seed-17", city: "Mumbai",       country: "IN", lat: 19.08, lon: 72.88 },
-  { id: "seed-18", city: "New York",     country: "US", lat: 40.71, lon: -74.01 },
-  { id: "seed-19", city: "Paris",        country: "FR", lat: 48.86, lon: 2.35 },
-  { id: "seed-20", city: "Nairobi",      country: "KE", lat: -1.29, lon: 36.82 },
+  { id: "seed-1",  city: "Bengaluru",    country: "IN", lat: 12.97, lon: 77.59, ts: 0, seed: true },
+  { id: "seed-2",  city: "Tokyo",        country: "JP", lat: 35.68, lon: 139.69, ts: 0, seed: true },
+  { id: "seed-3",  city: "Reykjavik",    country: "IS", lat: 64.14, lon: -21.94, ts: 0, seed: true },
+  { id: "seed-4",  city: "Cape Town",    country: "ZA", lat: -33.92, lon: 18.42, ts: 0, seed: true },
+  { id: "seed-5",  city: "Sao Paulo",    country: "BR", lat: -23.55, lon: -46.63, ts: 0, seed: true },
+  { id: "seed-6",  city: "San Francisco",country: "US", lat: 37.77, lon: -122.42, ts: 0, seed: true },
+  { id: "seed-7",  city: "London",       country: "GB", lat: 51.51, lon: -0.13, ts: 0, seed: true },
+  { id: "seed-8",  city: "Sydney",       country: "AU", lat: -33.87, lon: 151.21, ts: 0, seed: true },
+  { id: "seed-9",  city: "Dubai",        country: "AE", lat: 25.20, lon: 55.27, ts: 0, seed: true },
+  { id: "seed-10", city: "Berlin",       country: "DE", lat: 52.52, lon: 13.40, ts: 0, seed: true },
+  { id: "seed-11", city: "Singapore",    country: "SG", lat: 1.35,  lon: 103.82, ts: 0, seed: true },
+  { id: "seed-12", city: "Buenos Aires", country: "AR", lat: -34.60, lon: -58.38, ts: 0, seed: true },
+  { id: "seed-13", city: "Toronto",      country: "CA", lat: 43.65, lon: -79.38, ts: 0, seed: true },
+  { id: "seed-14", city: "Cairo",        country: "EG", lat: 30.04, lon: 31.24, ts: 0, seed: true },
+  { id: "seed-15", city: "Moscow",       country: "RU", lat: 55.75, lon: 37.62, ts: 0, seed: true },
 ];
 
-/**
- * @typedef {Object} Env
- * (KV bindings arrive in M4)
- */
+/* ================================ GET ================================ */
 
-export async function onRequestGet({ request }) {
+export async function onRequestGet({ request, env }) {
+  const stored = await readStars(env);
+  const stars = stored.length ? stored : SEED_CITIES;
+
+  return json({
+    stars,
+    you: readVisitorGeo(request),
+    total: stars.length,
+  });
+}
+
+/* ================================ POST =============================== */
+
+export async function onRequestPost({ request, env }) {
+  const you = readVisitorGeo(request);
+  if (!you.city || you.lat == null || you.lon == null) {
+    return json({ error: "geo unavailable" }, { status: 400 });
+  }
+
+  // Dedupe per IP for 24h.
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const ipHash = await sha256(ip);
+  const already = await env.VISITED_IP.get(ipHash);
+
+  const existing = await readStars(env);
+
+  if (already) {
+    return json({
+      stars: existing.length ? existing : SEED_CITIES,
+      you,
+      total: (existing.length ? existing : SEED_CITIES).length,
+      created: false,
+    });
+  }
+
+  // Create + persist the visitor's star.
+  const star = {
+    id: crypto.randomUUID(),
+    city: you.city,
+    country: you.country,
+    lat: you.lat,
+    lon: you.lon,
+    ts: Math.floor(Date.now() / 1000),
+  };
+
+  const next = [...existing, star].slice(-MAX_STARS);
+
+  await Promise.all([
+    env.STARS.put(STARS_KEY, JSON.stringify(next)),
+    env.VISITED_IP.put(ipHash, "1", { expirationTtl: IP_TTL_SECONDS }),
+  ]);
+
+  return json({
+    stars: next,
+    you,
+    total: next.length,
+    created: true,
+    yourStarId: star.id,
+  });
+}
+
+/* =============================== helpers ============================= */
+
+async function readStars(env) {
+  const raw = await env.STARS.get(STARS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readVisitorGeo(request) {
   const cf = request.cf || {};
-
-  // `you` — the visitor's own geo, from Cloudflare's edge.
-  const you = {
+  return {
     city: cf.city || null,
     country: cf.country || null,
     lat: cf.latitude ? Number(cf.latitude) : null,
     lon: cf.longitude ? Number(cf.longitude) : null,
-    colo: cf.colo || null,          // 3-letter edge datacenter code (e.g. "BLR")
+    colo: cf.colo || null,
     timezone: cf.timezone || null,
   };
+}
 
-  return json({
-    stars: SEED_CITIES,
-    you,
-    total: SEED_CITIES.length,
-  });
+async function sha256(input) {
+  const buf = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(hash)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function json(data, init = {}) {
@@ -60,8 +130,7 @@ function json(data, init = {}) {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      // Short cache so the API is snappy but doesn't stale during dev.
-      "cache-control": "public, max-age=30",
+      "cache-control": "no-store",
       ...(init.headers || {}),
     },
   });
