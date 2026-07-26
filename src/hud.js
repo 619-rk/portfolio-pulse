@@ -1,5 +1,4 @@
-// HUD — the top-left overlay panel.
-// Milestone 2 shows placeholders; M3 fills these from the API.
+// HUD helpers + tooltip control.
 
 export function initHud({ visitorCount, city, colo }) {
   setCount(visitorCount);
@@ -22,7 +21,30 @@ export function setColo(colo) {
   if (el) el.textContent = colo ?? "—";
 }
 
-// Reserved for M5 — click a star, HUD flashes a tag.
-export function flash(msg) {
-  console.log("[hud]", msg);
+const tip = () => document.getElementById("tooltip");
+
+export function showTooltip(star, clientX, clientY) {
+  const el = tip();
+  if (!el) return;
+  const country = star.country ? `, ${star.country}` : "";
+  const when = relativeTime(star.ts);
+  el.textContent = `${star.city || "somewhere"}${country} · ${when}`;
+  el.style.left = `${clientX}px`;
+  el.style.top = `${clientY}px`;
+  el.classList.remove("hidden");
+}
+
+export function hideTooltip() {
+  const el = tip();
+  if (el) el.classList.add("hidden");
+}
+
+function relativeTime(ts) {
+  if (!ts) return "seed city";
+  const nowS = Math.floor(Date.now() / 1000);
+  const s = Math.max(0, nowS - ts);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }

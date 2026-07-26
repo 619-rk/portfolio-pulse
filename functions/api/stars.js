@@ -1,15 +1,16 @@
 // Pages Function: /api/stars
 //
-// GET  → return all stars from KV (edge-cached, falls back to seed when empty).
-// POST → add the visitor's own star (once per 24h per IP), returns updated list.
+// GET  → return all stars (edge-cached for 60s via the Cache API) plus fresh visitor geo.
+// POST → add the visitor's own star (once per 24h per IP).
 //
-// KV bindings (configured in Cloudflare dashboard → Pages → Settings → Bindings):
-//   STARS       — single key "all" holds a JSON array of every visitor star.
-//   VISITED_IP  — key = sha256(ip), value = "1", TTL 24h. Used for dedupe.
+// KV bindings:
+//   STARS       — key "all" holds a JSON array of every visitor star.
+//   VISITED_IP  — key = sha256(ip), value = "1", TTL 24h. Dedupe.
 
 const STARS_KEY = "all";
-const MAX_STARS = 5000;      // cap so the blob stays small
+const MAX_STARS = 5000;
 const IP_TTL_SECONDS = 24 * 60 * 60;
+const EDGE_CACHE_SECONDS = 60;
 
 const SEED_CITIES = [
   { id: "seed-1",  city: "Bengaluru",    country: "IN", lat: 12.97, lon: 77.59, ts: 0, seed: true },
@@ -31,29 +32,59 @@ const SEED_CITIES = [
 
 /* ================================ GET ================================ */
 
-export async function onRequestGet({ request, env }) {
-  const stored = await readStars(env);
-  // Seeds always shown alongside real visitors.
-  const stars = [...SEED_CITIES, ...stored];
+export async function onRequestGet({ request, env, waitUntil }) {
+  const you = readVisitorGeo(request);
 
-  return json({
-    stars,
-    you: readVisitorGeo(request),
-    total: stars.length,
-    real: stored.length,
-    seeds: SEED_CITIES.length,
+  // Cache only the stars body (not the visitor-specific "you"), so every visitor
+  // still sees their own edge datacenter/city while sharing the star list.
+  const cacheUrl = new URL(request.url);
+  cacheUrl.pathname = "/__stars-cache";
+  const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
+  const cache = caches.default;
+
+  let cached = await cache.match(cacheKey);
+  let cacheStatus = "MISS";
+  let body;
+
+  if (cached) {
+    body = await cached.json();
+    cacheStatus = "HIT";
+  } else {
+    const stored = await readStars(env);
+    const stars = [...SEED_CITIES, ...stored];
+    body = {
+      stars,
+      total: stars.length,
+      real: stored.length,
+      seeds: SEED_CITIES.length,
+    };
+    const cacheResp = new Response(JSON.stringify(body), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": `public, s-maxage=${EDGE_CACHE_SECONDS}`,
+      },
+    });
+    waitUntil(cache.put(cacheKey, cacheResp));
+  }
+
+  return json({ ...body, you }, {
+    headers: {
+      // The client shouldn't cache (visitor-specific fields inside), but the edge already did.
+      "cache-control": "no-store",
+      // Custom header so DevTools can show cache behavior for the traffic-control lesson.
+      "x-edge-cache": cacheStatus,
+    },
   });
 }
 
 /* ================================ POST =============================== */
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, waitUntil }) {
   const you = readVisitorGeo(request);
   if (!you.city || you.lat == null || you.lon == null) {
     return json({ error: "geo unavailable" }, { status: 400 });
   }
 
-  // Dedupe per IP for 24h.
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
   const ipHash = await sha256(ip);
   const already = await env.VISITED_IP.get(ipHash);
@@ -63,15 +94,13 @@ export async function onRequestPost({ request, env }) {
   if (already) {
     const stars = [...SEED_CITIES, ...existing];
     return json({
-      stars,
-      you,
+      stars, you,
       total: stars.length,
       real: existing.length,
       created: false,
     });
   }
 
-  // Create + persist the visitor's star.
   const star = {
     id: crypto.randomUUID(),
     city: you.city,
@@ -88,10 +117,12 @@ export async function onRequestPost({ request, env }) {
     env.VISITED_IP.put(ipHash, "1", { expirationTtl: IP_TTL_SECONDS }),
   ]);
 
+  // Invalidate the GET edge cache so other visitors see the new star quickly.
+  waitUntil(invalidateStarsCache(request));
+
   const stars = [...SEED_CITIES, ...next];
   return json({
-    stars,
-    you,
+    stars, you,
     total: stars.length,
     real: next.length,
     created: true,
@@ -100,6 +131,14 @@ export async function onRequestPost({ request, env }) {
 }
 
 /* =============================== helpers ============================= */
+
+async function invalidateStarsCache(request) {
+  try {
+    const url = new URL(request.url);
+    url.pathname = "/__stars-cache";
+    await caches.default.delete(new Request(url.toString(), { method: "GET" }));
+  } catch (_) { /* best-effort */ }
+}
 
 async function readStars(env) {
   const raw = await env.STARS.get(STARS_KEY);
@@ -137,7 +176,6 @@ function json(data, init = {}) {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
       ...(init.headers || {}),
     },
   });

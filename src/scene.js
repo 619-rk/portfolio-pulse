@@ -1,5 +1,4 @@
-// Three.js scene, camera, renderer, and pointer tracking.
-// Exposes a `pointer` vector [-1..1] that stars.js reads for parallax + picking.
+// Three.js scene, camera, renderer, pointer tracking, and camera flight helper.
 
 import * as THREE from "three";
 
@@ -25,8 +24,15 @@ export function createScene(canvas) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
 
-  // Faint radial gradient background via a large back-facing sphere is overkill
-  // for M2 — the flat dark color already reads as deep space with the stars on top.
+  // Camera state — pointer parallax + flight-to-target both write here.
+  const state = {
+    parallaxEnabled: true,
+    flying: false,
+    flyStart: 0,
+    flyDuration: 0,
+    flyFrom: new THREE.Vector3(),
+    flyTo: new THREE.Vector3(),
+  };
 
   function onResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -37,12 +43,41 @@ export function createScene(canvas) {
   function onPointerMove(e) {
     pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
-
-    // Camera parallax — camera drifts opposite to the cursor for depth.
-    camera.position.x = pointer.x * 0.4;
-    camera.position.y = pointer.y * 0.3;
-    camera.lookAt(0, 0, 0);
+    if (state.parallaxEnabled && !state.flying) {
+      camera.position.x = pointer.x * 0.4;
+      camera.position.y = pointer.y * 0.3;
+      camera.lookAt(0, 0, 0);
+    }
   }
 
-  return { scene, camera, renderer, onResize, onPointerMove };
+  /**
+   * Smoothly move the camera toward `target`. `target` is a world-space point;
+   * we push the camera along the ray outward from origin so the target sits
+   * roughly centered in view.
+   */
+  function flyTo(target, durationMs = 1400) {
+    state.flying = true;
+    state.parallaxEnabled = false;
+    state.flyStart = performance.now();
+    state.flyDuration = durationMs;
+    state.flyFrom.copy(camera.position);
+    // Position camera at 1.9x the target's distance from origin along same ray.
+    state.flyTo.copy(target).normalize().multiplyScalar(2.6);
+  }
+
+  function tickCamera() {
+    if (!state.flying) return;
+    const t = Math.min(1, (performance.now() - state.flyStart) / state.flyDuration);
+    // Ease-in-out cubic
+    const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    camera.position.lerpVectors(state.flyFrom, state.flyTo, e);
+    camera.lookAt(0, 0, 0);
+    if (t >= 1) {
+      state.flying = false;
+      // Re-enable parallax after a short pause so it doesn't yank.
+      setTimeout(() => { state.parallaxEnabled = true; }, 800);
+    }
+  }
+
+  return { scene, camera, renderer, onResize, onPointerMove, flyTo, tickCamera, state };
 }

@@ -1,19 +1,26 @@
 // Star field: two layers.
-//   1) A dim red background of 10k "unvisited" stars evenly distributed on a sphere.
-//   2) A bright white "visited" layer for real visitors — larger, twinkling, gently pulsing.
+//   1) Background: ~10k dim red "unvisited" stars, ONLY on land (via earth-water mask).
+//   2) Foreground: bright white "visited" stars for real visitors. Yours pulses cyan for 10s.
+//
+// The foreground buffer's index space matches the `visited` array 1:1 so raycasting hits
+// can look up star metadata via `.index`.
 
 import * as THREE from "three";
 
 const SPHERE_RADIUS = 1.6;
-const BACKGROUND_COUNT = 10000;
+const BACKGROUND_TARGET = 10000;
+// three-globe ships a black/white land/water mask via unpkg. If the fetch fails we
+// silently degrade to a full-sphere background.
+const LAND_MASK_URL = "https://unpkg.com/three-globe/example/img/earth-water.png";
 
 /**
- * @param {Array<{lat:number, lon:number}>} visited  real visitor stars
+ * @param {Array<{lat:number, lon:number, id?:string}>} visited
+ * @param {string|null} yourStarId  id of the visitor's own star (or null)
  */
-export function createStarfield(visited) {
+export async function createStarfield(visited, yourStarId = null) {
   const group = new THREE.Group();
-  const bg = makeBackground(BACKGROUND_COUNT);
-  const fg = makeForeground(visited);
+  const bg = await makeBackground(BACKGROUND_TARGET);
+  const fg = makeForeground(visited, yourStarId);
   group.add(bg.mesh);
   group.add(fg.mesh);
 
@@ -22,25 +29,24 @@ export function createStarfield(visited) {
     fg.material.uniforms.uTime.value = t;
   }
 
-  return { mesh: group, update };
+  return { mesh: group, update, fg, bg, visited };
 }
 
-/* ------------------ background: 10k dim red stars ------------------ */
+/* ---------- background: ~10k dim red "unvisited" stars on LAND ---------- */
 
-function makeBackground(n) {
+async function makeBackground(target) {
+  const points = await landPoints(target).catch(() => fullSpherePoints(target));
+
+  const n = points.length;
   const positions = new Float32Array(n * 3);
   const phases = new Float32Array(n);
 
-  // Fibonacci sphere for even, non-clustered distribution.
   for (let i = 0; i < n; i++) {
-    const phi = Math.acos(1 - (2 * (i + 0.5)) / n);
-    const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-    const x = Math.sin(phi) * Math.cos(theta);
-    const y = Math.cos(phi);
-    const z = Math.sin(phi) * Math.sin(theta);
-    positions[i * 3]     = x * SPHERE_RADIUS;
-    positions[i * 3 + 1] = y * SPHERE_RADIUS;
-    positions[i * 3 + 2] = z * SPHERE_RADIUS;
+    const { lat, lon } = points[i];
+    const [x, y, z] = latLonToVec3(lat, lon, SPHERE_RADIUS);
+    positions[i * 3]     = x;
+    positions[i * 3 + 1] = y;
+    positions[i * 3 + 2] = z;
     phases[i] = Math.random() * Math.PI * 2;
   }
 
@@ -75,7 +81,6 @@ function makeBackground(n) {
         vec2 uv = gl_PointCoord - 0.5;
         float d = length(uv);
         float alpha = smoothstep(0.5, 0.0, d);
-        // Ember red — visible but not garish.
         vec3 col = vec3(1.0, 0.28, 0.20);
         gl_FragColor = vec4(col, alpha * vFlicker);
       }
@@ -85,14 +90,15 @@ function makeBackground(n) {
   return { mesh: new THREE.Points(geometry, material), material, geometry };
 }
 
-/* -------------- foreground: bright white visited stars -------------- */
+/* ----- foreground: bright visited stars, with a cyan halo for "yours" ----- */
 
-function makeForeground(visited) {
+function makeForeground(visited, yourStarId) {
   const n = Math.max(visited.length, 1);
   const positions = new Float32Array(n * 3);
   const sizes = new Float32Array(n);
   const phases = new Float32Array(n);
   const speeds = new Float32Array(n);
+  const isMine = new Float32Array(n);
 
   for (let i = 0; i < n; i++) {
     const v = visited[i] || { lat: 0, lon: 0 };
@@ -103,6 +109,7 @@ function makeForeground(visited) {
     sizes[i] = 14 + Math.random() * 10;
     phases[i] = Math.random() * Math.PI * 2;
     speeds[i] = 0.6 + Math.random() * 1.4;
+    isMine[i] = v.id && v.id === yourStarId ? 1.0 : 0.0;
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -110,6 +117,7 @@ function makeForeground(visited) {
   geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
   geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
   geometry.setAttribute("aSpeed", new THREE.BufferAttribute(speeds, 1));
+  geometry.setAttribute("aIsMine", new THREE.BufferAttribute(isMine, 1));
 
   const material = new THREE.ShaderMaterial({
     transparent: true,
@@ -123,32 +131,97 @@ function makeForeground(visited) {
       attribute float aSize;
       attribute float aPhase;
       attribute float aSpeed;
+      attribute float aIsMine;
       uniform float uTime;
       uniform float uPixelRatio;
       varying float vTwinkle;
+      varying float vMine;
+      varying float vHalo;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         float t = sin(uTime * aSpeed + aPhase) * 0.5 + 0.5;
         vTwinkle = 0.55 + t * 0.45;
-        gl_PointSize = aSize * uPixelRatio * (1.0 / -mv.z) * vTwinkle;
+        vMine = aIsMine;
+        // "Your star" halo pulses for ~10 seconds then fades.
+        vHalo = aIsMine * max(0.0, 1.0 - uTime / 10.0)
+              * (0.6 + sin(uTime * 3.5) * 0.4);
+        float boost = 1.0 + vHalo * 1.5;
+        gl_PointSize = aSize * uPixelRatio * (1.0 / -mv.z) * vTwinkle * boost;
       }
     `,
     fragmentShader: /* glsl */ `
       varying float vTwinkle;
+      varying float vMine;
+      varying float vHalo;
       void main() {
         vec2 uv = gl_PointCoord - 0.5;
         float d = length(uv);
         float core = smoothstep(0.5, 0.0, d);
-        float halo = smoothstep(0.5, 0.2, d) * 0.35;
-        // Warm white core with a hint of gold at peak twinkle.
-        vec3 col = mix(vec3(0.85, 0.92, 1.0), vec3(1.0, 0.96, 0.85), vTwinkle);
-        gl_FragColor = vec4(col, (core + halo) * vTwinkle);
+        float halo = smoothstep(0.5, 0.2, d) * 0.4;
+        vec3 warm = mix(vec3(0.85, 0.92, 1.0), vec3(1.0, 0.96, 0.85), vTwinkle);
+        vec3 cyan = vec3(0.45, 0.95, 1.0);
+        vec3 col  = mix(warm, cyan, vHalo);
+        float a = (core + halo + vHalo * 0.7) * vTwinkle;
+        gl_FragColor = vec4(col, a);
       }
     `,
   });
 
   return { mesh: new THREE.Points(geometry, material), material, geometry };
+}
+
+/* ------------------------- land mask sampling ------------------------- */
+
+async function landPoints(target) {
+  const img = await loadImage(LAND_MASK_URL);
+  const canvas = document.createElement("canvas");
+  const W = img.width, H = img.height;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  const { data } = ctx.getImageData(0, 0, W, H);
+
+  const points = [];
+  let tries = 0;
+  const maxTries = target * 8;
+  while (points.length < target && tries < maxTries) {
+    tries++;
+    // Uniform sphere sampling
+    const u = Math.random();
+    const v = Math.random();
+    const lat = Math.asin(2 * v - 1) * 180 / Math.PI;
+    const lon = u * 360 - 180;
+    const px = Math.floor(((lon + 180) / 360) * W);
+    const py = Math.floor((1 - (lat + 90) / 180) * H);
+    const idx = (py * W + px) * 4;
+    // three-globe's earth-water: land = white, water = black.
+    if (data[idx] > 128) points.push({ lat, lon });
+  }
+  return points;
+}
+
+function fullSpherePoints(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const phi = Math.acos(1 - (2 * (i + 0.5)) / n);
+    const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+    const lat = 90 - (phi * 180) / Math.PI;
+    const lon = ((theta * 180) / Math.PI) % 360 - 180;
+    out.push({ lat, lon });
+  }
+  return out;
+}
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
 }
 
 /* ------------------------------ helpers ------------------------------ */
