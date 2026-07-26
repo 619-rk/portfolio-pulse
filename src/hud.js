@@ -177,7 +177,11 @@ function closeComposer() {
   modal.setAttribute("aria-hidden", "true");
 }
 
-openBtn?.addEventListener("click", openComposer);
+openBtn?.addEventListener("click", (e) => {
+  console.log("[composer] button clicked", { modal, visitorCityCache });
+  e.stopPropagation();
+  openComposer();
+});
 modalClose?.addEventListener("click", closeComposer);
 modal?.addEventListener("click", (e) => { if (e.target === modal) closeComposer(); });
 window.addEventListener("keydown", (e) => {
